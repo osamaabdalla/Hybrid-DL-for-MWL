@@ -1,0 +1,35 @@
+# Full 48-subject LOSO (long runtime). Set use_ica: true to match manuscript Methods.
+
+project:
+  seed: 42
+
+paths:
+  raw_data_dir: data/STEW
+  output_dir: outputs
+
+preprocessing:
+  bandpass_low: 1.0
+  bandpass_high: 40.0
+  notch_freq: 50
+  use_ica: true
+  cz_proxy_reference: true
+
+features:
+  method: welch
+  window_length_sec: 10
+  sequence_steps: 10
+
+vae:
+  latent_dim: 128
+  epochs: 20
+
+training:
+  epochs: 35
+  batch_size: 32
+  learning_rate: 0.001
+
+reproducibility:
+  loso_subjects_limit: null
+  quick_mode: false
+  run_sensitivity: true
+  strict_subject_count: true
