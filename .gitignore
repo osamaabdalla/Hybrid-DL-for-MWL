@@ -1,5 +1,6 @@
 .venv/
 venv/
+*.egg-info/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -8,3 +9,6 @@ __pycache__/
 .DS_Store
 *.keras
 *.h5
+data/STEW/interim/*.npz
+data/STEW/processed/*.npz
+outputs/
