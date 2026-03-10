@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "STEW mental workload reproduction (VAE-CBAM-BiLSTM)"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "PyYAML>=6.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
