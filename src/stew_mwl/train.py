@@ -11,10 +11,10 @@ import pandas as pd
 import tensorflow as tf
 from sklearn.metrics import f1_score
 
-from .config import CLASS_NAMES, Config, RGB_BANDS
-from .data import loso_fold_subject_ids, make_loso_splits, preprocess_signal, read_signal_txt
-from .eval import aggregate_fold_metrics, psd_svm_baseline, summarize_metrics
-from .features import build_sequence_images
+from .config import CHANNELS, CLASS_NAMES, Config, RGB_BANDS
+from .data import load_preprocessed_signal, loso_fold_subject_ids, make_loso_splits
+from .eval import aggregate_fold_metrics, psd_svm_baseline_from_features, summarize_metrics
+from .features import build_psd_sequence_features, build_sequence_images_cached
 from .models import (
     build_blstm_lstm_classifier,
     build_classifier_from_encoder,
@@ -34,10 +34,14 @@ def build_dataset_for_subjects(
     n_ch = len(RGB_BANDS)
     for _, row in subject_rows.iterrows():
         subject = int(row["subject"])
-        baseline = preprocess_signal(read_signal_txt(Path(row["lo_path"])), cfg)
-        task = preprocess_signal(read_signal_txt(Path(row["hi_path"])), cfg)
-        x_bl = build_sequence_images(baseline, cfg, window_seconds=window_seconds, sequence_length=sequence_length)
-        x_task = build_sequence_images(task, cfg, window_seconds=window_seconds, sequence_length=sequence_length)
+        baseline = load_preprocessed_signal(Path(row["lo_path"]), subject, "lo", cfg)
+        task = load_preprocessed_signal(Path(row["hi_path"]), subject, "hi", cfg)
+        x_bl = build_sequence_images_cached(
+            baseline, Path(row["lo_path"]), subject, "lo", cfg, window_seconds, sequence_length
+        )
+        x_task = build_sequence_images_cached(
+            task, Path(row["hi_path"]), subject, "hi", cfg, window_seconds, sequence_length
+        )
         tc = row["task_class"]
         if len(x_bl):
             X.append(x_bl)
@@ -59,6 +63,38 @@ def build_dataset_for_subjects(
     return X, y, subjects
 
 
+def build_psd_dataset_for_subjects(
+    subject_rows: pd.DataFrame,
+    cfg: Config,
+    window_seconds: int | None = None,
+    sequence_length: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """LOSO-aligned PSD feature matrix [N, 42] for PSD-SVM baseline."""
+    X, y, subjects = [], [], []
+    for _, row in subject_rows.iterrows():
+        subject = int(row["subject"])
+        baseline = load_preprocessed_signal(Path(row["lo_path"]), subject, "lo", cfg)
+        task = load_preprocessed_signal(Path(row["hi_path"]), subject, "hi", cfg)
+        x_bl = build_psd_sequence_features(baseline, cfg, window_seconds=window_seconds, sequence_length=sequence_length)
+        x_task = build_psd_sequence_features(task, cfg, window_seconds=window_seconds, sequence_length=sequence_length)
+        tc = row["task_class"]
+        if len(x_bl):
+            X.append(x_bl)
+            y.append(np.full(len(x_bl), cfg.class_to_id["BL"], dtype=np.int64))
+            subjects.append(np.full(len(x_bl), subject, dtype=np.int64))
+        if len(x_task):
+            X.append(x_task)
+            y.append(np.full(len(x_task), cfg.class_to_id[tc], dtype=np.int64))
+            subjects.append(np.full(len(x_task), subject, dtype=np.int64))
+    if not X:
+        fdim = len(CHANNELS) * len(RGB_BANDS)
+        return np.empty((0, fdim), np.float32), np.empty((0,), np.int64), np.empty((0,), np.int64)
+    X = np.concatenate(X, axis=0)
+    y = np.concatenate(y, axis=0)
+    subjects = np.concatenate(subjects, axis=0)
+    return X, y, subjects
+
+
 class ValMacroF1Callback(tf.keras.callbacks.Callback):
     """Logs val_macro_f1 each epoch (early stopping still uses val_loss — stable with custom metrics in Keras)."""
 
@@ -74,11 +110,17 @@ class ValMacroF1Callback(tf.keras.callbacks.Callback):
         logs["val_macro_f1"] = float(f1_score(self.y_val, y_p, average="macro", zero_division=0))
 
 
-def _classification_callbacks(x_val: np.ndarray, y_val: np.ndarray) -> list[tf.keras.callbacks.Callback]:
+def _classification_callbacks(cfg: Config, x_val: np.ndarray, y_val: np.ndarray) -> list[tf.keras.callbacks.Callback]:
+    monitor = (cfg.early_stopping_monitor or "val_macro_f1").strip()
+    mode = "max" if monitor == "val_macro_f1" else "min"
     return [
         ValMacroF1Callback(x_val, y_val),
         tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=10, mode="min", restore_best_weights=True, verbose=0
+            monitor=monitor,
+            patience=int(cfg.early_stopping_patience),
+            mode=mode,
+            restore_best_weights=True,
+            verbose=0,
         ),
     ]
 
@@ -94,13 +136,26 @@ def train_vae_on_frames(
     rng = np.random.default_rng(cfg.seed + fold_id + 17)
     order = rng.permutation(len(frames))
     frames = frames[order]
+    vf = float(getattr(cfg, "vae_val_fraction", 0.1))
+    n_fr = len(frames)
+    if n_fr >= 10:
+        split = max(1, int(n_fr * (1.0 - vf)))
+        if split >= n_fr:
+            split = n_fr - 1
+        frames_tr, frames_val = frames[:split], frames[split:]
+    elif n_fr >= 2:
+        split = n_fr - 1
+        frames_tr, frames_val = frames[:split], frames[split:]
+    else:
+        frames_tr, frames_val = frames, frames
     vae, encoder, decoder = build_vae(
         image_shape=(cfg.image_h, cfg.image_w, n_ch),
         latent_dim=cfg.latent_dim,
     )
     vae.compile(optimizer=tf.keras.optimizers.Adam(cfg.learning_rate))
     hist = vae.fit(
-        frames,
+        frames_tr,
+        validation_data=frames_val,
         epochs=cfg.vae_epochs,
         batch_size=cfg.batch_size,
         shuffle=False,
@@ -111,6 +166,7 @@ def train_vae_on_frames(
         n = len(losses)
         recon = hist.history.get("reconstruction_loss", [float("nan")] * n)
         kl = hist.history.get("kl_loss", [float("nan")] * n)
+        val = hist.history.get("val_loss", [])
         for i, loss in enumerate(losses):
             log_rows.append(
                 {
@@ -119,10 +175,46 @@ def train_vae_on_frames(
                     "train_total_loss": float(loss),
                     "train_recon_loss": float(recon[i]) if i < len(recon) else float("nan"),
                     "train_kl_loss": float(kl[i]) if i < len(kl) else float("nan"),
-                    "val_total_loss": float("nan"),
+                    "val_total_loss": float(val[i]) if i < len(val) else float("nan"),
                 }
             )
     return vae, encoder, decoder, hist
+
+
+def collect_vae_latent_summary_rows(
+    encoder: tf.keras.Model,
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    cfg: Config,
+    fold_id: int,
+    loso_test_subject: int,
+    rng: np.random.Generator,
+) -> list[dict]:
+    """Per-class latent statistics on training-subject frames for this LOSO fold (PRD `vae_latent_summary.csv`)."""
+    n_ch = x_train.shape[-1]
+    flat = x_train.reshape(-1, cfg.image_h, cfg.image_w, n_ch).astype(np.float32)
+    t = x_train.shape[1]
+    y_flat = np.repeat(y_train, t)
+    rows: list[dict] = []
+    for c in range(len(CLASS_NAMES)):
+        idx = np.where(y_flat == c)[0]
+        if len(idx) == 0:
+            continue
+        take = min(256, len(idx))
+        sel = rng.choice(idx, size=take, replace=False)
+        batch = flat[sel]
+        _, zm, zlv, _ = encoder.predict(batch, batch_size=min(64, len(batch)), verbose=0)
+        rows.append(
+            {
+                "fold_id": fold_id,
+                "subject_id": int(loso_test_subject),
+                "class_name": CLASS_NAMES[c],
+                "latent_mean_norm": float(np.mean(np.linalg.norm(zm, axis=1))),
+                "latent_log_var_mean": float(np.mean(zlv)),
+                "latent_var_mean": float(np.mean(np.exp(zlv))),
+            }
+        )
+    return rows
 
 
 def train_classifier_model(
@@ -138,28 +230,38 @@ def train_classifier_model(
     sequence_model: str = "lstm",
     cbam_reduction_ratio: int | None = None,
     cbam_spatial_kernel: int | None = None,
+    gate_cbam_with_config: bool = True,
 ) -> tuple[tf.keras.Model, tf.keras.callbacks.History]:
     cr = cbam_reduction_ratio if cbam_reduction_ratio is not None else cfg.cbam_reduction_ratio
     ck = cbam_spatial_kernel if cbam_spatial_kernel is not None else cfg.cbam_spatial_kernel
+    use_cbam_eff = bool(use_cbam and (cfg.cbam_enabled if gate_cbam_with_config else True))
     model = build_classifier_from_encoder(
         frame_shape=(cfg.image_h, cfg.image_w, x_train.shape[-1]),
         sequence_length=x_train.shape[1],
         latent_dim=cfg.latent_dim,
         n_classes=len(CLASS_NAMES),
         dropout=cfg.dropout,
-        use_cbam=use_cbam,
+        use_cbam=use_cbam_eff,
         use_encoder=use_encoder,
         bidirectional=bidirectional,
         sequence_model=sequence_model,
         blstm_units=cfg.blstm_units,
         cbam_reduction_ratio=cr,
         cbam_spatial_kernel=ck,
+        cbam_attention_order=cfg.cbam_attention_order,
     )
     if vae is not None and use_encoder:
         copy_vae_encoder_weights_to_classifier(vae, model)
     n = max(len(x_train), 1)
     decay_steps = max(n // cfg.batch_size, 1)
-    model = compile_classifier(model, cfg.learning_rate, use_decay=True, decay_steps=decay_steps)
+    use_decay = str(cfg.lr_schedule).lower() != "none"
+    model = compile_classifier(
+        model,
+        cfg.learning_rate,
+        use_decay=use_decay,
+        decay_steps=decay_steps,
+        schedule=cfg.lr_schedule,
+    )
     hist = model.fit(
         x_train,
         y_train,
@@ -167,7 +269,7 @@ def train_classifier_model(
         epochs=cfg.clf_epochs,
         batch_size=cfg.batch_size,
         verbose=0,
-        callbacks=_classification_callbacks(x_val, y_val),
+        callbacks=_classification_callbacks(cfg, x_val, y_val),
     )
     return model, hist
 
@@ -190,7 +292,14 @@ def train_blstm_lstm_model(
     )
     n = max(len(x_train), 1)
     decay_steps = max(n // cfg.batch_size, 1)
-    model = compile_classifier(model, cfg.learning_rate, use_decay=True, decay_steps=decay_steps)
+    use_decay = str(cfg.lr_schedule).lower() != "none"
+    model = compile_classifier(
+        model,
+        cfg.learning_rate,
+        use_decay=use_decay,
+        decay_steps=decay_steps,
+        schedule=cfg.lr_schedule,
+    )
     hist = model.fit(
         x_train,
         y_train,
@@ -198,7 +307,7 @@ def train_blstm_lstm_model(
         epochs=cfg.clf_epochs,
         batch_size=cfg.batch_size,
         verbose=0,
-        callbacks=_classification_callbacks(x_val, y_val),
+        callbacks=_classification_callbacks(cfg, x_val, y_val),
     )
     return model, hist
 
@@ -221,6 +330,7 @@ def train_cnn_baseline_model(
         use_encoder=False,
         bidirectional=False,
         sequence_model="cnn",
+        gate_cbam_with_config=False,
     )
 
 
@@ -245,9 +355,13 @@ def run_loso_training(
     model_name: str = "proposed",
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], list[dict[str, Any]]]:
     cfg.ensure_dirs()
+    from .export import export_cbam_config_results
+
+    export_cbam_config_results(cfg)
     rows: list[dict] = []
     all_preds: list[dict] = []
     vae_log_rows: list[dict] = []
+    vae_latent_rows: list[dict] = []
     splits = make_loso_splits(manifest, cfg)
     fold_id = 0
     for sp in splits:
@@ -261,7 +375,11 @@ def run_loso_training(
             continue
         x_tr, y_tr, x_va, y_va = train_val_split(x_train, y_train, cfg, int(subject))
 
-        vae, _, _, _ = train_vae_on_frames(x_tr, cfg, log_rows=vae_log_rows, fold_id=fold_id)
+        vae, encoder, _, _ = train_vae_on_frames(x_tr, cfg, log_rows=vae_log_rows, fold_id=fold_id)
+        rng_lat = np.random.default_rng(cfg.seed + fold_id + 999)
+        vae_latent_rows.extend(
+            collect_vae_latent_summary_rows(encoder, x_tr, y_tr, cfg, fold_id, int(subject), rng_lat)
+        )
         model, _ = train_classifier_model(
             x_tr,
             y_tr,
@@ -306,6 +424,8 @@ def run_loso_training(
     df = pd.DataFrame(rows)
     if vae_log_rows:
         pd.DataFrame(vae_log_rows).to_csv(cfg.csv_dir / "vae_fold_losses.csv", index=False)
+    if vae_latent_rows:
+        pd.DataFrame(vae_latent_rows).to_csv(cfg.csv_dir / "vae_latent_summary.csv", index=False)
     return df, splits, all_preds
 
 
@@ -329,8 +449,12 @@ def run_baseline_models(
             subject = sp["test_subject"]
             train_rows = manifest[manifest["subject"].isin(sp["train_subjects"])]
             test_rows = manifest[manifest["subject"] == subject]
-            x_train, y_train, _ = build_dataset_for_subjects(train_rows, cfg)
-            x_test, y_test, _ = build_dataset_for_subjects(test_rows, cfg)
+            if name == "psd_svm":
+                x_train, y_train, _ = build_psd_dataset_for_subjects(train_rows, cfg)
+                x_test, y_test, _ = build_psd_dataset_for_subjects(test_rows, cfg)
+            else:
+                x_train, y_train, _ = build_dataset_for_subjects(train_rows, cfg)
+                x_test, y_test, _ = build_dataset_for_subjects(test_rows, cfg)
             if len(x_train) == 0 or len(x_test) == 0:
                 fold_id += 1
                 continue
@@ -347,7 +471,7 @@ def run_baseline_models(
 
 
 def _run_loso_psd_svm(x_train, y_train, x_test, cfg: Config) -> np.ndarray:
-    return psd_svm_baseline(x_train, y_train, x_test, seed=cfg.seed)
+    return psd_svm_baseline_from_features(x_train, y_train, x_test, seed=cfg.seed)
 
 
 def _run_loso_cnn(x_train, y_train, x_test, cfg: Config) -> np.ndarray:
@@ -366,6 +490,7 @@ def run_ablation_variants(
     cfg: Config,
     manifest: pd.DataFrame,
     loso_splits: list[dict[str, Any]] | None = None,
+    full_fold_metrics_df: pd.DataFrame | None = None,
 ) -> dict[str, pd.DataFrame]:
     cfg.ensure_dirs()
     if loso_splits is None:
@@ -393,7 +518,9 @@ def run_ablation_variants(
             vae = None
             if kwargs["use_encoder"]:
                 vae, _, _, _ = train_vae_on_frames(x_tr, cfg, fold_id=fold_id)
-            model, _ = train_classifier_model(x_tr, y_tr, x_va, y_va, cfg, vae=vae, **kwargs)
+            model, _ = train_classifier_model(
+                x_tr, y_tr, x_va, y_va, cfg, vae=vae, gate_cbam_with_config=False, **kwargs
+            )
             preds = model.predict(x_test, verbose=0).argmax(axis=1)
             m = summarize_metrics(y_test, preds)
             m["subject"] = int(subject)
@@ -402,7 +529,12 @@ def run_ablation_variants(
             rows.append(m)
             fold_id += 1
         results[vname] = pd.DataFrame(rows)
-    ab_fold = []
+    ab_fold: list[pd.DataFrame] = []
+    if full_fold_metrics_df is not None and len(full_fold_metrics_df):
+        fdf = full_fold_metrics_df.copy()
+        fdf = fdf.drop(columns=["model_name"], errors="ignore")
+        fdf["variant"] = "full_proposed"
+        ab_fold.append(fdf)
     for vname, df in results.items():
         df = df.copy()
         df["variant"] = vname
@@ -453,6 +585,7 @@ def run_sensitivity_grids(cfg: Config, manifest: pd.DataFrame) -> dict[str, pd.D
                 vae=vae,
                 cbam_reduction_ratio=red,
                 cbam_spatial_kernel=sk,
+                gate_cbam_with_config=False,
             )
             preds = model.predict(x_test, verbose=0).argmax(axis=1)
             m = summarize_metrics(y_test, preds)
@@ -479,7 +612,9 @@ def run_sensitivity_grids(cfg: Config, manifest: pd.DataFrame) -> dict[str, pd.D
                 continue
             x_tr, y_tr, x_va, y_va = train_val_split(x_train, y_train, cfg, int(subject))
             vae, _, _, _ = train_vae_on_frames(x_tr, cfg)
-            model, _ = train_classifier_model(x_tr, y_tr, x_va, y_va, cfg, vae=vae)
+            model, _ = train_classifier_model(
+                x_tr, y_tr, x_va, y_va, cfg, vae=vae, gate_cbam_with_config=False
+            )
             preds = model.predict(x_test, verbose=0).argmax(axis=1)
             m = summarize_metrics(y_test, preds)
             m["subject"] = int(subject)
@@ -507,7 +642,9 @@ def run_sensitivity_grids(cfg: Config, manifest: pd.DataFrame) -> dict[str, pd.D
                 continue
             x_tr, y_tr, x_va, y_va = train_val_split(x_train, y_train, c, int(subject))
             vae, _, _, _ = train_vae_on_frames(x_tr, c)
-            model, _ = train_classifier_model(x_tr, y_tr, x_va, y_va, c, vae=vae)
+            model, _ = train_classifier_model(
+                x_tr, y_tr, x_va, y_va, c, vae=vae, gate_cbam_with_config=False
+            )
             preds = model.predict(x_test, verbose=0).argmax(axis=1)
             m = summarize_metrics(y_test, preds)
             m["subject"] = int(subject)
@@ -531,6 +668,9 @@ def run_sensitivity_grids(cfg: Config, manifest: pd.DataFrame) -> dict[str, pd.D
     summary = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     if len(summary):
         summary.to_csv(cfg.csv_dir / "sensitivity_all_summary.csv", index=False)
+    from .export import export_cbam_config_results
+
+    export_cbam_config_results(cfg, sensitivity_cbam_df=df_cbam if len(df_cbam) else None)
     return {
         "latent": df_latent,
         "cbam": df_cbam,
