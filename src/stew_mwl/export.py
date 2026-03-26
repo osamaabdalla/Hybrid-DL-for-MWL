@@ -8,8 +8,8 @@ from pathlib import Path
 import pandas as pd
 
 from .config import CLASS_NAMES, Config
-from .data import preprocess_signal, read_signal_txt
-from .eval import aggregate_fold_metrics, paired_ttest_detail
+from .data import load_preprocessed_signal
+from .eval import aggregate_fold_metrics, paired_ttest_detail, wilcoxon_paired_detail
 from .features import build_sequence_images
 
 
@@ -27,17 +27,20 @@ def export_segmentation_summary(manifest: pd.DataFrame, cfg: Config) -> Path:
     seq_steps = cfg.seq_len
     for _, row in manifest.iterrows():
         sid = int(row["subject"])
-        for _, path_key, label in (
+        for side, path_key, label in (
             ("lo", "lo_path", "BL"),
             ("hi", "hi_path", row["task_class"]),
         ):
-            sig = preprocess_signal(read_signal_txt(Path(row[path_key])), cfg)
+            sig = load_preprocessed_signal(Path(row[path_key]), sid, side, cfg)
             seqs = build_sequence_images(sig, cfg, window_seconds=window_seconds, sequence_length=seq_steps)
+            epoch_samp = max(1, int(cfg.epoch_seconds * cfg.sfreq))
+            num_epochs = int(sig.shape[0] // epoch_samp)
             rows.append(
                 {
                     "subject_id": sid,
                     "class_name": label,
                     "original_samples": int(sig.shape[0]),
+                    "num_epochs": num_epochs,
                     "num_sequences": int(len(seqs)),
                     "window_length_sec": window_seconds,
                     "sequence_steps": seq_steps,
@@ -111,8 +114,26 @@ def export_baseline_comparison_summary(baseline_results: dict[str, pd.DataFrame]
     pd.DataFrame(rows).to_csv(cfg.csv_dir / "baseline_comparison_summary.csv", index=False)
 
 
-def export_ablation_summary(ablation_results: dict[str, pd.DataFrame], full_df: pd.DataFrame, cfg: Config) -> None:
+def export_ablation_summary(
+    ablation_results: dict[str, pd.DataFrame],
+    full_df: pd.DataFrame,
+    cfg: Config,
+    *,
+    include_full_proposed_summary_row: bool = True,
+) -> None:
     rows = []
+    if include_full_proposed_summary_row and len(full_df):
+        _, s = aggregate_fold_metrics(full_df)
+        rows.append(
+            {
+                "variant": "full_proposed",
+                "mean_accuracy": s["accuracy"],
+                "std_accuracy": s["std_accuracy"],
+                "mean_macro_f1": s["macro_f1"],
+                "std_macro_f1": s.get("std_macro_f1", 0.0),
+                "p_value_vs_full": float("nan"),
+            }
+        )
     for name, df in ablation_results.items():
         if len(df) == 0:
             continue
@@ -135,45 +156,108 @@ def export_ablation_summary(ablation_results: dict[str, pd.DataFrame], full_df: 
     pd.DataFrame(rows).to_csv(cfg.csv_dir / "ablation_summary.csv", index=False)
 
 
+def export_cbam_config_results(
+    cfg: Config,
+    sensitivity_cbam_df: pd.DataFrame | None = None,
+) -> Path:
+    """
+    PRD Stage G3: CBAM hyperparameters for the active YAML plus optional sensitivity sweep rows
+    (mean metrics from `sensitivity_cbam.csv` aggregation).
+    """
+    cfg.csv_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict] = [
+        {
+            "config_label": "active_yaml",
+            "cbam_enabled": cfg.cbam_enabled,
+            "reduction_ratio": cfg.cbam_reduction_ratio,
+            "spatial_kernel": cfg.cbam_spatial_kernel,
+            "attention_order": cfg.cbam_attention_order,
+            "mean_accuracy": float("nan"),
+            "mean_macro_f1": float("nan"),
+            "mean_balanced_accuracy": float("nan"),
+            "mean_cohen_kappa": float("nan"),
+            "std_accuracy": float("nan"),
+            "std_macro_f1": float("nan"),
+        }
+    ]
+    def _row_float(series: pd.Series, key: str) -> float:
+        if key not in series.index:
+            return float("nan")
+        v = series[key]
+        return float(v) if pd.notna(v) else float("nan")
+
+    if sensitivity_cbam_df is not None and len(sensitivity_cbam_df):
+        for _, r in sensitivity_cbam_df.iterrows():
+            rows.append(
+                {
+                    "config_label": f"sweep_r{int(r['reduction_ratio'])}_k{int(r['spatial_kernel'])}",
+                    "cbam_enabled": True,
+                    "reduction_ratio": int(r["reduction_ratio"]),
+                    "spatial_kernel": int(r["spatial_kernel"]),
+                    "attention_order": cfg.cbam_attention_order,
+                    "mean_accuracy": _row_float(r, "accuracy"),
+                    "mean_macro_f1": _row_float(r, "macro_f1"),
+                    "mean_balanced_accuracy": _row_float(r, "balanced_accuracy"),
+                    "mean_cohen_kappa": _row_float(r, "cohen_kappa"),
+                    "std_accuracy": _row_float(r, "std_accuracy"),
+                    "std_macro_f1": _row_float(r, "std_macro_f1"),
+                }
+            )
+    path = cfg.csv_dir / "cbam_config_results.csv"
+    pd.DataFrame(rows).to_csv(path, index=False)
+    return path
+
+
 def export_statistical_tests(
     full_df: pd.DataFrame,
     baseline_results: dict[str, pd.DataFrame],
     ablation_results: dict[str, pd.DataFrame] | None,
     cfg: Config,
 ) -> None:
+    """PRD Stage M: paired t-test and Wilcoxon signed-rank on matched LOSO subjects (`accuracy`)."""
+    cfg.csv_dir.mkdir(parents=True, exist_ok=True)
     rows = []
+
+    def _add_rows(name: str, model_b: str, odf: pd.DataFrame) -> None:
+        dt = paired_ttest_detail(full_df, odf, "accuracy")
+        dw = wilcoxon_paired_detail(full_df, odf, "accuracy")
+        rows.append(
+            {
+                "comparison_name": name,
+                "model_a": "proposed",
+                "model_b": model_b,
+                "metric": "accuracy",
+                "t_statistic": dt["t_statistic"],
+                "p_value": dt["p_value"],
+                "significant": dt["significant"],
+                "wilcoxon_statistic": dw["wilcoxon_statistic"],
+                "wilcoxon_p_value": dw["p_value"],
+                "wilcoxon_significant": dw["significant"],
+            }
+        )
+
     for bname, df in baseline_results.items():
         if len(df) == 0:
             continue
-        d = paired_ttest_detail(full_df, df, "accuracy")
-        rows.append(
-            {
-                "comparison_name": f"proposed_vs_{bname}",
-                "model_a": "proposed",
-                "model_b": bname,
-                "metric": "accuracy",
-                "t_statistic": d["t_statistic"],
-                "p_value": d["p_value"],
-                "significant": d["significant"],
-            }
-        )
+        _add_rows(f"proposed_vs_{bname}", bname, df)
     if ablation_results:
         for aname, df in ablation_results.items():
             if len(df) == 0:
                 continue
-            d = paired_ttest_detail(full_df, df, "accuracy")
-            rows.append(
-                {
-                    "comparison_name": f"proposed_vs_{aname}",
-                    "model_a": "proposed",
-                    "model_b": aname,
-                    "metric": "accuracy",
-                    "t_statistic": d["t_statistic"],
-                    "p_value": d["p_value"],
-                    "significant": d["significant"],
-                }
-            )
+            _add_rows(f"proposed_vs_{aname}", aname, df)
     pd.DataFrame(rows).to_csv(cfg.csv_dir / "statistical_tests.csv", index=False)
+
+
+def export_gradcam_summaries(
+    region_df: pd.DataFrame,
+    sample_df: pd.DataFrame,
+    cfg: Config,
+) -> None:
+    cfg.csv_dir.mkdir(parents=True, exist_ok=True)
+    if len(region_df):
+        region_df.to_csv(cfg.csv_dir / "gradcam_region_summary.csv", index=False)
+    if len(sample_df):
+        sample_df.to_csv(cfg.csv_dir / "gradcam_sample_scores.csv", index=False)
 
 
 def export_experiment_registry(cfg: Config, notes: str = "") -> None:
@@ -184,13 +268,25 @@ def export_experiment_registry(cfg: Config, notes: str = "") -> None:
         ).strip()
     except Exception:
         pass
+    cpath = cfg.config_path
+    config_name = cpath.stem if cpath else ""
     pd.DataFrame(
         [
             {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "git_commit": commit,
                 "seed": cfg.seed,
-                "config_path": str(cfg.config_path) if cfg.config_path else "",
+                "config_name": config_name,
+                "config_path": str(cpath) if cpath else "",
+                "output_root": str(cfg.output_root.resolve()),
+                "data_root": str(cfg.data_root.resolve()),
+                "feature_method": cfg.feature_method,
+                "latent_dim": cfg.latent_dim,
+                "reference_mode": cfg.reference_mode,
+                "cbam_enabled": cfg.cbam_enabled,
+                "cbam_attention_order": cfg.cbam_attention_order,
+                "cache_preprocessed": cfg.cache_preprocessed,
+                "cache_sequences": cfg.cache_sequences,
                 "notes": notes,
             }
         ]
