@@ -5,32 +5,47 @@ project:
 paths:
   raw_data_dir: data/STEW
   output_dir: outputs
+  interim_data_dir: data/STEW/interim
+  processed_data_dir: data/STEW/processed
+
+cache:
+  preprocessed: false
+  sequences: false
 
 dataset:
   sfreq: 128
+  strict_signal_audit: false
+  verify_stew_conventions: false
+  min_recording_samples: 0
 
 preprocessing:
   bandpass_low: 1.0
   bandpass_high: 40.0
   notch_freq: 50
   use_ica: false
+  # reference_mode: none | average | cz_proxy (if omitted, cz_proxy_reference below still enables Cz-proxy)
+  reference_mode: none
   cz_proxy_reference: true
 
 features:
   method: welch
   image_height: 80
   image_width: 60
+  epoch_seconds: 2.0
   window_length_sec: 10
   sequence_steps: 10
 
 vae:
   latent_dim: 128
   epochs: 5
+  val_fraction: 0.1
 
 cbam:
   enabled: true
   reduction_ratio: 8
   spatial_kernel_size: 7
+  # attention_order: channel_spatial | spatial_channel | parallel
+  attention_order: channel_spatial
 
 model:
   blstm_units: 20
@@ -40,9 +55,13 @@ training:
   epochs: 5
   batch_size: 8
   learning_rate: 0.001
+  lr_schedule: exponential
+  early_stopping_monitor: val_macro_f1
+  early_stopping_patience: 10
 
 reproducibility:
   loso_subjects_limit: 2
   quick_mode: true
   run_sensitivity: false
   strict_subject_count: false
+  expected_n_subjects: 48
