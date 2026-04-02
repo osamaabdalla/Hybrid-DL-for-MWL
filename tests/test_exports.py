@@ -15,7 +15,7 @@ def test_export_manifest_csv(tmp_path):
             "lo_path": ["x"],
             "hi_path": ["y"],
             "rating": [5.0],
-            "task_label": ["medium"],
+            "task_label": ["MW"],
             "task_class": ["MW"],
         }
     )
