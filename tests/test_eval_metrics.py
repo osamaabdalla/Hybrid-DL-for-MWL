@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.metrics import confusion_matrix
 
 from stew_mwl.config import CLASS_NAMES
-from stew_mwl.eval import aggregate_fold_metrics, paired_ttest_vs_full
+from stew_mwl.eval import aggregate_fold_metrics, paired_ttest_vs_full, wilcoxon_paired_detail
 
 
 def test_aggregate_empty():
@@ -16,6 +16,14 @@ def test_paired_ttest():
     b = pd.DataFrame({"subject": [1, 2], "accuracy": [0.7, 0.85]})
     p = paired_ttest_vs_full(a, b, "accuracy")
     assert 0 <= p <= 1
+
+
+def test_wilcoxon_paired_detail():
+    a = pd.DataFrame({"subject": [1, 2, 3], "accuracy": [0.8, 0.9, 0.85]})
+    b = pd.DataFrame({"subject": [1, 2, 3], "accuracy": [0.7, 0.85, 0.8]})
+    d = wilcoxon_paired_detail(a, b, "accuracy")
+    assert "wilcoxon_statistic" in d
+    assert 0 <= d["p_value"] <= 1
 
 
 def test_confusion_fixed_labels():
