@@ -4,7 +4,7 @@ Open-source reproduction pipeline for:
 
 **Hybrid deep learning for mental workload classification using EEG with enhanced preprocessing and interpretability**
 
-The implementation follows a manuscript-aligned protocol (CSV exports, config-driven runs). A detailed PRD may be kept locally as `PRD.md` (gitignored).
+The implementation follows a manuscript-aligned protocol (CSV exports, config-driven runs).
 
 ## What you get
 
@@ -59,9 +59,9 @@ Training-related YAML keys (see `configs/*.yaml`):
 - `cache.sequences`: if `true`, sequence tensors (topomap stacks) are cached as `.npz` under `paths.processed_data_dir` (keyed by config + source mtime)
 - `preprocessing.reference_mode`: `none`, `average` (common average reference per sample), or `cz_proxy`. If `none`, legacy `cz_proxy_reference: true` still selects Cz-proxy referencing in `preprocess_signal`
 - `dataset.strict_signal_audit` / `dataset.min_recording_samples`: optional full-file checks when building the manifest
-- `dataset.verify_stew_conventions`: if `true`, `sfreq` must be **128** (STEW convention; PRD A2-style check on config, not file headers)
-- `cbam.enabled`: if `false`, the **main LOSO proposed** run omits CBAM; ablations and sensitivity still use each variant’s explicit `use_cbam` flags (PRD J2 fairness)
-- `cbam.attention_order`: `channel_spatial` (default), `spatial_channel`, or `parallel` (PRD G1)
+- `dataset.verify_stew_conventions`: if `true`, `sfreq` must be **128** (STEW convention; enforced on config, not from raw file headers)
+- `cbam.enabled`: if `false`, the **main LOSO proposed** run omits CBAM; ablations and sensitivity still use each variant’s explicit `use_cbam` flags for fair comparisons
+- `cbam.attention_order`: `channel_spatial` (default), `spatial_channel`, or `parallel`
 - `vae.val_fraction`: held-out frame fraction for VAE training; `csv/vae_fold_losses.csv` includes `val_total_loss` when Keras reports `val_loss`
 - **PSD–SVM baseline:** band-power features (theta, alpha, beta × 14 channels) per sequence window, same parent-window segmentation as the CNN inputs; pipeline is `StandardScaler` → `PCA` → RBF `SVC`
 
@@ -84,8 +84,8 @@ Training-related YAML keys (see `configs/*.yaml`):
 | `csv/statistical_tests.csv` | Paired t-test + Wilcoxon signed-rank vs baselines/ablations (per subject) |
 | `csv/gradcam_*.csv` | Regional / sample Grad-CAM scores |
 | `csv/experiment_registry.csv` | Run metadata |
-| `csv/cbam_config_results.csv` | Active CBAM YAML settings + optional sensitivity sweep rows (PRD G3) |
-| `reports/table_*.csv`, `MANUSCRIPT_TABLES.md` | Consolidated tables (PRD Section 14) |
+| `csv/cbam_config_results.csv` | Active CBAM YAML settings + optional sensitivity sweep rows |
+| `reports/table_*.csv`, `MANUSCRIPT_TABLES.md` | Consolidated manuscript-style tables |
 | `logs/output_manifest.csv` | Index of generated CSV/PNG/report paths |
 | `models/fold_XX_proposed.keras` | Checkpoints |
 | `figures/*.png` | Confusion matrix, baselines, ablations, VAE, Grad-CAM |

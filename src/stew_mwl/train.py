@@ -190,7 +190,7 @@ def collect_vae_latent_summary_rows(
     loso_test_subject: int,
     rng: np.random.Generator,
 ) -> list[dict]:
-    """Per-class latent statistics on training-subject frames for this LOSO fold (PRD `vae_latent_summary.csv`)."""
+    """Per-class latent statistics on training-subject frames for this LOSO fold (`vae_latent_summary.csv`)."""
     n_ch = x_train.shape[-1]
     flat = x_train.reshape(-1, cfg.image_h, cfg.image_w, n_ch).astype(np.float32)
     t = x_train.shape[1]

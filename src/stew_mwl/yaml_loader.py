@@ -1,4 +1,4 @@
-"""Load `Config` from PRD-style YAML files under `configs/`."""
+"""Load `Config` from YAML files under `configs/`."""
 
 from __future__ import annotations
 from pathlib import Path

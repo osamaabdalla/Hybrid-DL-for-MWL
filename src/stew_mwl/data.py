@@ -119,7 +119,7 @@ def rating_to_level(rating: float) -> str:
 
 
 def _validate_signal_file_uniqueness(cfg: Config) -> list[str]:
-    """PRD A2: no duplicate (subject, task) STEW text files under data_root."""
+    """Ensure at most one STEW text file per (subject, task) under data_root."""
     issues: list[str] = []
     try:
         files = discover_signal_files(cfg.data_root)

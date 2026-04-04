@@ -12,6 +12,3 @@ __pycache__/
 data/STEW/interim/*.npz
 data/STEW/processed/*.npz
 outputs/
-
-# Local product spec; not distributed with the repo
-PRD.md

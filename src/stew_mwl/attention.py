@@ -1,4 +1,4 @@
-"""PRD Stage G: CBAM block (implementation lives in `models`; this module is the documented entry)."""
+"""CBAM block re-exported from `models` for a stable import path."""
 
 from .models import cbam_block
 

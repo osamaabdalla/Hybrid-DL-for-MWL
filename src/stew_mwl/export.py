@@ -161,7 +161,7 @@ def export_cbam_config_results(
     sensitivity_cbam_df: pd.DataFrame | None = None,
 ) -> Path:
     """
-    PRD Stage G3: CBAM hyperparameters for the active YAML plus optional sensitivity sweep rows
+    CBAM hyperparameters for the active YAML plus optional sensitivity sweep rows
     (mean metrics from `sensitivity_cbam.csv` aggregation).
     """
     cfg.csv_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +214,7 @@ def export_statistical_tests(
     ablation_results: dict[str, pd.DataFrame] | None,
     cfg: Config,
 ) -> None:
-    """PRD Stage M: paired t-test and Wilcoxon signed-rank on matched LOSO subjects (`accuracy`)."""
+    """Paired t-test and Wilcoxon signed-rank on matched LOSO subjects (`accuracy`)."""
     cfg.csv_dir.mkdir(parents=True, exist_ok=True)
     rows = []
 

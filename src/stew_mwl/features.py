@@ -153,7 +153,7 @@ def build_sequence_images_cached(
     window_seconds: int | None = None,
     sequence_length: int | None = None,
 ) -> np.ndarray:
-    """Same as `build_sequence_images` but optionally persist under `cfg.processed_dir` (PRD E5)."""
+    """Same as `build_sequence_images` but optionally persist under `cfg.processed_dir`."""
     if not getattr(cfg, "cache_sequences", False):
         return build_sequence_images(signal_array, cfg, window_seconds=window_seconds, sequence_length=sequence_length)
     cfg.processed_dir.mkdir(parents=True, exist_ok=True)
@@ -169,7 +169,7 @@ def build_sequence_images_cached(
 
 
 def _psd_feature_vector_for_parent(parent: np.ndarray, cfg: Config) -> np.ndarray:
-    """Welch PSD integrated over theta, alpha, beta per channel → 14×3 vector (PRD PSD-SVM)."""
+    """Welch PSD integrated over theta, alpha, beta per channel → 14×3 vector (PSD–SVM baseline)."""
     freqs, psd = welch(parent, fs=cfg.sfreq, nperseg=min(parent.shape[0], cfg.sfreq), axis=0)
     feats: list[np.ndarray] = []
     for band in RGB_BANDS:

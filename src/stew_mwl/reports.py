@@ -1,4 +1,4 @@
-"""Manuscript-style consolidated tables from exported CSVs (PRD notebook Section 14)."""
+"""Manuscript-style consolidated tables from exported CSVs."""
 
 from __future__ import annotations
 from pathlib import Path

@@ -112,8 +112,8 @@ def cbam_block(
     order: str = "channel_spatial",
 ):
     """
-    CBAM: `channel_spatial` (default), `spatial_channel` (spatial then channel, PRD sequential_spatial_channel),
-    or `parallel` (channel and spatial masks both from the input, then fused by multiply — PRD parallel).
+    CBAM: `channel_spatial` (default), `spatial_channel` (spatial then channel),
+    or `parallel` (channel and spatial masks both from the input, then fused by multiply).
     """
     o = (order or "channel_spatial").lower()
     if o == "spatial_channel":
@@ -256,7 +256,7 @@ def build_classifier_from_encoder(
 
 def build_proposed_model(cfg, n_channels: int = 3):
     """
-    PRD H1 entry point: build the VAE-style encoder + optional CBAM + BiLSTM classifier graph (uncompiled).
+    Build the VAE-style encoder + optional CBAM + BiLSTM classifier graph (uncompiled).
     `n_channels` is the number of topomap channels (typically 3 for θ/α/β).
     """
     from .config import CLASS_NAMES, Config
