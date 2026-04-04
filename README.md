@@ -4,7 +4,7 @@ Open-source reproduction pipeline for:
 
 **Hybrid deep learning for mental workload classification using EEG with enhanced preprocessing and interpretability**
 
-The implementation follows the product requirements in `PRD.md` (manuscript-aligned protocol, CSV exports, config-driven runs).
+The implementation follows a manuscript-aligned protocol (CSV exports, config-driven runs). A detailed PRD may be kept locally as `PRD.md` (gitignored).
 
 ## What you get
 
@@ -97,7 +97,6 @@ Generated `outputs/`, `data/STEW/interim/*.npz`, and `data/STEW/processed/*.npz`
 ```text
 .
 ├── LICENSE
-├── PRD.md
 ├── README.md
 ├── configs/
 │   ├── default.yaml
@@ -125,7 +124,7 @@ Generated `outputs/`, `data/STEW/interim/*.npz`, and `data/STEW/processed/*.npz`
 
 ## Reproducibility scope
 
-The repo reproduces the **protocol**, **splits**, **metrics**, and **table structure** from the manuscript. It does **not** guarantee bit-identical weights on every machine; see `PRD.md` section 9.
+The repo reproduces the **protocol**, **splits**, **metrics**, and **table structure** from the manuscript. It does **not** guarantee bit-identical weights on every machine; see the manuscript and `README` reproducibility notes above.
 
 ## How to cite
 
