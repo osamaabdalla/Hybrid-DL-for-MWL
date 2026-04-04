@@ -8,7 +8,7 @@ The implementation follows a manuscript-aligned protocol (CSV exports, config-dr
 
 ## What you get
 
-- **Notebook:** `notebooks/stew_mwl_reproduction.ipynb` — end-to-end: dataset validation → LOSO proposed model → baselines → ablations → sensitivity (if enabled) → Grad-CAM CSV + figures → manuscript-style report tables → output manifest.
+- **Notebook:** `notebooks/stew_mwl_reproduction.ipynb` walks through the same steps in order (dataset check, LOSO proposed model, baselines, ablations, optional sensitivity, figures, Grad-CAM, then report tables and a file manifest).
 - **Package:** `src/stew_mwl/` — preprocessing cache, topomaps (Welch / Morlet), VAE + CBAM + BiLSTM, exponential or cosine LR schedule, early stopping on `val_macro_f1` or `val_loss`, LOSO, baselines, ablations, sensitivity, Grad-CAM, export, `reports`, plotting.
 - **Configs:** `configs/default.yaml` (fast smoke), `configs/full_reproduction.yaml` (48-subject-style, **preprocessed signal cache on**, sensitivity on).
 - **License:** `LICENSE` (MIT).
