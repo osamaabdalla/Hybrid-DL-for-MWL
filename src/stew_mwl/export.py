@@ -1,4 +1,4 @@
-"""Write result tables under outputs/csv/ for the notebook and OSF-style sharing."""
+"""CSV exports under ``cfg.output_root / csv``."""
 
 from __future__ import annotations
 import subprocess
@@ -160,10 +160,7 @@ def export_cbam_config_results(
     cfg: Config,
     sensitivity_cbam_df: pd.DataFrame | None = None,
 ) -> Path:
-    """
-    CBAM hyperparameters for the active YAML plus optional sensitivity sweep rows
-    (mean metrics from `sensitivity_cbam.csv` aggregation).
-    """
+    """Write active CBAM settings; optionally append rows from a sensitivity sweep dataframe."""
     cfg.csv_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = [
         {
@@ -214,7 +211,7 @@ def export_statistical_tests(
     ablation_results: dict[str, pd.DataFrame] | None,
     cfg: Config,
 ) -> None:
-    """Paired t-test and Wilcoxon signed-rank on matched LOSO subjects (`accuracy`)."""
+    """Paired t-test and Wilcoxon on per-subject accuracy vs baselines and ablations."""
     cfg.csv_dir.mkdir(parents=True, exist_ok=True)
     rows = []
 

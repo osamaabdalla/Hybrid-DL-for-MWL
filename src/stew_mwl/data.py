@@ -65,8 +65,7 @@ def detect_ratings_file(data_root: Path) -> Path | None:
     return sorted(candidates)[0] if candidates else None
 
 def parse_ratings_file(path: Path) -> pd.DataFrame:
-    # Flexible parser for CSV/TXT/TSV-like files with subject and rating columns
-    ext = path.suffix.lower()
+    """Parse STEW-style ratings (CSV/TSV-ish) into subject + numeric rating."""
     seps = [",", "\t", None]
     frames = []
     for sep in seps:
@@ -80,7 +79,6 @@ def parse_ratings_file(path: Path) -> pd.DataFrame:
         raise ValueError(f"Could not parse ratings file: {path}")
     df = max(frames, key=lambda x: x.shape[1]).copy()
 
-    lower_map = {c.lower().strip(): c for c in df.columns}
     subject_col = None
     rating_col = None
     for c in df.columns:

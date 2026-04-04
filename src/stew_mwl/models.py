@@ -1,8 +1,11 @@
 
 from __future__ import annotations
+
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+
+from .config import CLASS_NAMES, Config
 
 
 def _spatial_channel_mean_max(t, name_prefix: str):
@@ -206,9 +209,7 @@ def build_classifier_from_encoder(
     frame_input = keras.Input(shape=frame_shape, name="frame_input")
     x = frame_input
     if use_encoder:
-        _, encoder, _ = build_vae(frame_shape, latent_dim)
-        feature_map = encoder.get_layer("vae_feature_map").output  # unavailable in a fresh model path
-        # safer manual encoder replica
+        # Same depth as VAE encoder trunk (weights copied from trained VAE when provided).
         x = layers.Conv2D(16, 3, padding="same", activation="relu")(x)
         x = layers.MaxPooling2D(pool_size=2)(x)
         x = layers.Conv2D(32, 3, padding="same", activation="relu")(x)
@@ -255,12 +256,7 @@ def build_classifier_from_encoder(
 
 
 def build_proposed_model(cfg, n_channels: int = 3):
-    """
-    Build the VAE-style encoder + optional CBAM + BiLSTM classifier graph (uncompiled).
-    `n_channels` is the number of topomap channels (typically 3 for θ/α/β).
-    """
-    from .config import CLASS_NAMES, Config
-
+    """Classifier graph matching the main pipeline (VAE-style CNN trunk + CBAM + BiLSTM); not compiled."""
     if not isinstance(cfg, Config):
         raise TypeError("cfg must be a stew_mwl.config.Config instance")
     seq_len = cfg.seq_len

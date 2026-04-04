@@ -105,6 +105,7 @@ Generated `outputs/`, `data/STEW/interim/*.npz`, and `data/STEW/processed/*.npz`
 │   └── stew_mwl_reproduction.ipynb
 ├── src/
 │   └── stew_mwl/
+│       ├── __init__.py
 │       ├── config.py
 │       ├── yaml_loader.py
 │       ├── data.py

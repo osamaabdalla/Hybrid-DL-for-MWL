@@ -35,16 +35,8 @@ def make_gradcam_heatmap(model, sequence_batch, class_index=None, conv_layer_nam
     return heatmap.numpy()
 
 
-def activation_frequency_summary(heatmaps, threshold=0.6):
-    heatmaps = np.asarray(heatmaps)
-    return (heatmaps >= threshold).mean(axis=0)
-
-
 def default_frontal_parietal_masks(image_h: int, image_w: int) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Anterior / posterior halves of the interpolated topomap grid as proxies for
-    frontal vs parietal regions (STEW 10–20 layout does not include Fp1/Fz/Pz).
-    """
+    """Rough frontal vs parietal masks (top/bottom halves of the topomap grid)."""
     frontal = np.zeros((image_h, image_w), dtype=bool)
     parietal = np.zeros((image_h, image_w), dtype=bool)
     frontal[: max(1, image_h // 2), :] = True

@@ -14,6 +14,7 @@ from sklearn.metrics import f1_score
 from .config import CHANNELS, CLASS_NAMES, Config, RGB_BANDS
 from .data import load_preprocessed_signal, loso_fold_subject_ids, make_loso_splits
 from .eval import aggregate_fold_metrics, psd_svm_baseline_from_features, summarize_metrics
+from .export import export_cbam_config_results
 from .features import build_psd_sequence_features, build_sequence_images_cached
 from .models import (
     build_blstm_lstm_classifier,
@@ -96,7 +97,7 @@ def build_psd_dataset_for_subjects(
 
 
 class ValMacroF1Callback(tf.keras.callbacks.Callback):
-    """Logs val_macro_f1 each epoch (early stopping still uses val_loss — stable with custom metrics in Keras)."""
+    """Logs macro-F1 on a fixed val set each epoch (for early stopping when that metric is selected)."""
 
     def __init__(self, x_val: np.ndarray, y_val: np.ndarray):
         super().__init__()
@@ -355,8 +356,6 @@ def run_loso_training(
     model_name: str = "proposed",
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], list[dict[str, Any]]]:
     cfg.ensure_dirs()
-    from .export import export_cbam_config_results
-
     export_cbam_config_results(cfg)
     rows: list[dict] = []
     all_preds: list[dict] = []
@@ -668,8 +667,6 @@ def run_sensitivity_grids(cfg: Config, manifest: pd.DataFrame) -> dict[str, pd.D
     summary = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     if len(summary):
         summary.to_csv(cfg.csv_dir / "sensitivity_all_summary.csv", index=False)
-    from .export import export_cbam_config_results
-
     export_cbam_config_results(cfg, sensitivity_cbam_df=df_cbam if len(df_cbam) else None)
     return {
         "latent": df_latent,
